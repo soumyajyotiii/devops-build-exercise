@@ -1,0 +1,46 @@
+{
+  "loan_id": "SAAF-2026-04892",
+  "loan_type": "DSCR",
+  "borrower": {
+    "id": "BRW-7291",
+    "name": "Michael Reeves",
+    "email": "m.reeves@investormail.com",
+    "entity": "Reeves Capital Holdings LLC",
+    "communication_preferences": {
+      "preferred_channel": "email",
+      "timezone": "America/New_York",
+      "response_pattern": "typically replies within 24-48 hours",
+      "notes": "Borrower has expressed frustration with repeated document requests on prior loans. Prefers clear, specific instructions with examples."
+    }
+  },
+  "item": {
+    "id": "ITEM-002",
+    "category": "large_deposit_explanation",
+    "priority": "high",
+    "status": "outstanding",
+    "source": "underwriter",
+    "underwriter_notes": "January 2026 bank statement shows a $47,200 deposit on 01/18/2026 that does not appear to be from a regular/recurring source. Borrower must provide a signed letter of explanation identifying the source of the deposit, along with supporting documentation (e.g., sale contract, wire confirmation, gift letter if applicable).",
+    "documents_on_file": [
+      {
+        "name": "Reeves_Capital_Bank_Statement_Jan2026.pdf",
+        "uploaded": "2026-03-05",
+        "pages": 4,
+        "status": "accepted"
+      }
+    ],
+    "previous_attempts": [
+      {
+        "date": "2026-03-18",
+        "borrower_response": "Uploaded a screenshot of a Zelle transfer — no signed letter, no supporting documentation.",
+        "reviewer_action": "Rejected. Informed borrower via email that a signed explanation letter is required in addition to the transfer evidence.",
+        "resolution": "not_cleared"
+      }
+    ]
+  },
+  "timeline_pressure": {
+    "days_until_rate_lock_expiry": 17,
+    "days_until_target_close": 13,
+    "risk_level": "moderate",
+    "notes": "Rate lock expires April 14. If outstanding items aren't cleared by April 7, closing will likely slip past lock expiration, requiring a lock extension ($1,200 estimated cost to borrower) or renegotiation."
+  }
+}
