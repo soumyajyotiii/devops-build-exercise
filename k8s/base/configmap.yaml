@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: underwriting-agent-config
+  namespace: underwriting-agent
+data:
+  PORT: "8080"
+  LOG_LEVEL: "INFO"
+  ENVIRONMENT: "dev"
+  LLM_PROVIDER: "anthropic"
+  LLM_MODEL: "claude-sonnet-4-6"
+  AWS_REGION: "us-east-1"
+  SES_FROM_ADDRESS: "loans@saaffinance.com"
+  OTEL_SERVICE_NAME: "underwriting-agent"

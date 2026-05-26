@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: underwriting-agent
+  labels:
+    app.kubernetes.io/part-of: underwriting-agent
+    environment: shared
