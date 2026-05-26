@@ -1,0 +1,40 @@
+name: ai-pr-review
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - "k8s/**"
+      - "monitoring/**"
+      - "Dockerfile"
+      - ".github/workflows/**"
+      - ".dockerignore"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+    # dont run on draft PRs
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: install deps
+        run: pip install -r scripts/ai-ops/requirements.txt
+
+      - name: run AI review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd scripts/ai-ops
+          python pr_review.py \
+            --repo ${{ github.repository }} \
+            --pr ${{ github.event.pull_request.number }}

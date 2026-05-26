@@ -14,6 +14,14 @@ spec:
     groupInterval: 5m
     repeatInterval: 4h
     routes:
+      # all alerts also go to AI triage agent for auto-diagnosis
+      - matchers:
+          - name: severity
+            matchType: =~
+            value: "critical|warning"
+        receiver: ai-triage
+        continue: true   # continue matching so alerts still go to pagerduty/slack
+
       # critical alerts go to pagerduty immediately
       - matchers:
           - name: severity
@@ -54,3 +62,9 @@ spec:
           channel: "#underwriting-agent-alerts"
           title: ':warning: {{ .GroupLabels.alertname }}'
           text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+    # AI triage agent — receives all alerts, runs automated diagnosis
+    - name: ai-triage
+      webhookConfigs:
+        - url: "http://incident-triage.underwriting-agent.svc:9095"
+          sendResolved: false

@@ -1,0 +1,3 @@
+anthropic>=0.34
+httpx>=0.27
+kubernetes>=29.0

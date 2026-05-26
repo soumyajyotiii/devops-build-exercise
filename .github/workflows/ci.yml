@@ -207,3 +207,18 @@ jobs:
           sleep 10
           kubectl -n underwriting-agent exec deploy/underwriting-agent -- curl -sf http://localhost:8080/healthz
           echo "healthcheck passed"
+
+      - name: install ai-ops deps
+        run: pip install -r scripts/ai-ops/requirements.txt
+
+      - name: AI post-deploy health check
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          K8S_NAMESPACE: underwriting-agent
+        run: |
+          cd scripts/ai-ops
+          python deploy_health.py \
+            --commit ${{ github.sha }} \
+            --duration 180 \
+            --interval 30

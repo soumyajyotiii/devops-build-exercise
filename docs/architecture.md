@@ -152,3 +152,21 @@ latency budget:
 | prod | live traffic | full HA, multi-AZ | real PII (encrypted) |
 
 strict rule: no production data in non-prod environments. ever.
+
+### AI ops layer
+
+we use Claude API to automate operational toil across four integration points:
+
+```
+┌── alertmanager ──► incident triage agent (tool-use) ──► slack diagnosis
+│
+├── github PR ──────► PR risk reviewer ──────────────► PR comment
+│
+├── ci/cd deploy ───► post-deploy health checker ────► slack verdict
+│
+└── cron (weekly) ──► ops digest generator ──────────► slack #sre-weekly
+```
+
+all scripts live in `scripts/ai-ops/` and use Claude API directly (no agents SDK). the incident triage agent uses tool-use so Claude can choose which kubectl/health-check commands to run based on the alert context. the other three are simpler prompt-based integrations.
+
+see `docs/ai-ops.md` for full details.
