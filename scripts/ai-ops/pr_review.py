@@ -27,12 +27,15 @@ import httpx
 
 from utils import log
 
-client = anthropic.Anthropic()
+client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
 
 MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")  # github actions provides this automatically
 
-# these are the compliance requirements we check against
+# -- compliance context --
+# this gets injected into the system prompt so Claude knows what to check for.
+# sourced from docs/security-compliance.md — if the requirements change there,
+# update them here too.
 SECURITY_CONTEXT = """
 key compliance requirements for this project (financial services):
 - encryption at rest (KMS-managed) for all data stores
@@ -76,9 +79,12 @@ if the change looks clean, say so — dont manufacture issues.
 
 
 def get_pr_diff(repo: str, pr_number: int) -> str:
-    """fetch PR diff from github API."""
+    """fetch PR diff from github API.
+
+    tries gh CLI first (works locally if youre authenticated),
+    falls back to the REST API with a token (works in CI).
+    """
     if not GITHUB_TOKEN:
-        # try gh CLI
         result = subprocess.run(
             f"gh pr diff {pr_number} --repo {repo}",
             shell=True, capture_output=True, text=True,
@@ -112,7 +118,11 @@ def get_pr_files(repo: str, pr_number: int) -> list[str]:
 
 
 def is_infra_change(files: list[str]) -> bool:
-    """check if any changed files are infrastructure-related."""
+    """check if any changed files are infrastructure-related.
+
+    we only run AI review on infra files — reviewing application code changes
+    is out of scope for this tool (and would be noisy on every PR).
+    """
     infra_patterns = [
         "terraform/", "k8s/", "monitoring/", "Dockerfile",
         ".github/workflows/", ".dockerignore", "docker-compose",
@@ -124,7 +134,14 @@ def is_infra_change(files: list[str]) -> bool:
 
 
 def review_diff(diff: str, changed_files: list[str] | None = None) -> str:
-    """send the diff to Claude for review."""
+    """send the diff to Claude for review.
+
+    no tool-use here — unlike incident triage, PR review is a single-shot analysis.
+    Claude gets the diff and compliance context, produces a risk assessment, done.
+
+    diff is truncated to 50k chars because very large PRs would exceed token limits.
+    in practice infra PRs are rarely that big.
+    """
     file_context = ""
     if changed_files:
         file_context = f"\nchanged files:\n" + "\n".join(f"  - {f}" for f in changed_files)
@@ -151,11 +168,16 @@ def review_diff(diff: str, changed_files: list[str] | None = None) -> str:
 
 
 def post_pr_comment(repo: str, pr_number: int, comment: str):
-    """post a review comment on the PR."""
+    """post a review comment on the PR.
+
+    posts as a regular issue comment (not a review). this means it doesnt
+    approve or request changes — its purely informational. the human reviewer
+    makes the actual decision.
+    """
     header = "## 🤖 AI infra review\n\n"
     full_comment = header + comment
 
-    # try gh CLI first
+    # try gh CLI first (simpler, handles auth automatically)
     result = subprocess.run(
         f'gh pr comment {pr_number} --repo {repo} --body "$(cat)"',
         shell=True, input=full_comment, capture_output=True, text=True,

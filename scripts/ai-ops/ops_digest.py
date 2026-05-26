@@ -75,7 +75,12 @@ this gets posted to #sre-weekly and the eng manager reads it.
 
 
 def collect_deployment_history(days: int = 7) -> str:
-    """get recent deployments from git log."""
+    """get recent deployments from git log.
+
+    uses git log as a proxy for deployment history since every merge to main
+    triggers a deploy (via our CI pipeline). REPO_PATH env var lets this run
+    from anywhere — in CI the checkout is at a different path.
+    """
     result = subprocess.run(
         f"git log --oneline --since='{days} days ago' --format='%h %s (%cr)'",
         shell=True, capture_output=True, text=True, cwd=os.getenv("REPO_PATH", "."),
@@ -109,7 +114,13 @@ def collect_rollout_history() -> str:
 
 
 def collect_all_data(days: int = 7) -> dict:
-    """collect all operational data for the digest."""
+    """collect all operational data for the digest.
+
+    ideally wed also pull prometheus metrics (latency percentiles, error rate,
+    items processed) but that requires access to the prometheus query API which
+    varies by setup. for now we work with what kubectl gives us and note the
+    gaps in the prompt so Claude mentions them in the digest.
+    """
     log.info(f"collecting ops data for the past {days} days...")
 
     data = {
@@ -125,7 +136,12 @@ def collect_all_data(days: int = 7) -> dict:
 
 
 def generate_digest(data: dict) -> str:
-    """send collected data to Claude for digest generation."""
+    """send collected data to Claude for digest generation.
+
+    this is a single-shot prompt — no tool-use, no loop. Claude gets all the
+    data at once and produces the digest. the system prompt constrains the
+    output format so its consistent week to week.
+    """
     data_text = ""
     for key, value in data.items():
         data_text += f"\n### {key.replace('_', ' ')}\n{value}\n"

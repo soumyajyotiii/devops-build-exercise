@@ -70,7 +70,12 @@ output format:
 
 
 def collect_health_snapshot() -> dict:
-    """collect a single health snapshot from the cluster."""
+    """collect a single point-in-time health snapshot from the cluster.
+
+    we grab multiple signals in each snapshot so Claude can correlate them:
+    e.g. "pods are restarting AND error logs mention OOM" is more useful
+    than either signal alone.
+    """
     snapshot = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
         "pods": get_pod_status(),
@@ -91,7 +96,13 @@ def collect_health_snapshot() -> dict:
 
 
 def collect_snapshots(duration_sec: int = 180, interval_sec: int = 30) -> list[dict]:
-    """collect health snapshots over a time period."""
+    """collect health snapshots over a time period.
+
+    default: 6 snapshots over 3 minutes (every 30 seconds).
+    we take multiple snapshots because a single point-in-time check can be
+    misleading — a pod might be restarting right now but will be fine in 30s.
+    Claude gets the full time series and can spot trends (getting worse vs recovering).
+    """
     snapshots = []
     iterations = max(1, duration_sec // interval_sec)
 
@@ -145,7 +156,12 @@ please analyze these snapshots and provide your deployment health verdict."""
 
 
 def trigger_rollback():
-    """execute rollback if needed."""
+    """execute a k8s rollback to the previous deployment revision.
+
+    this undoes the most recent rollout. the deployment keeps its revision
+    history (revisionHistoryLimit: 5) so we can always go back.
+    only called when --auto-rollback is set AND Claude says UNHEALTHY.
+    """
     log.warning("triggering rollback...")
     result = kubectl(f"rollout undo deployment/{DEPLOYMENT} -n {NAMESPACE}")
     log.info(f"rollback result: {result}")
@@ -177,11 +193,13 @@ def main():
 
     print(analysis)
 
-    # determine verdict from the analysis text
+    # parse Claude's verdict from the analysis text.
+    # we look for "UNHEALTHY" after the word "verdict" to avoid false positives
+    # from Claude mentioning unhealthy in other contexts (like "not unhealthy").
+    # this is a rough heuristic — good enough for deciding whether to alert.
     is_unhealthy = "UNHEALTHY" in analysis.upper().split("VERDICT")[1] if "VERDICT" in analysis.upper() else False
 
     if not args.dry_run:
-        # post to slack
         emoji = "✅" if not is_unhealthy else "🚨"
         title = f"{emoji} deploy health check: {args.commit[:7]}"
         post_to_slack(
@@ -200,6 +218,8 @@ def main():
                 text=f"⚠️ deploy {args.commit[:7]} looks unhealthy but auto-rollback is OFF. manual action needed.",
             )
 
+    # exit code 1 on unhealthy — this fails the CI job so the pipeline
+    # shows red and the deploy engineer knows something went wrong
     if is_unhealthy:
         sys.exit(1)
 

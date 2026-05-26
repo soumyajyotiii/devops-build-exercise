@@ -42,11 +42,18 @@ from utils import (
     NAMESPACE,
 )
 
-client = anthropic.Anthropic()
+client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env automatically
 
 MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
-# tools that claude can call to gather diagnostic information
+# -- tool definitions for Claude tool-use --
+# these describe what diagnostic tools Claude can call. each one maps to a
+# real function in utils.py that runs kubectl or checks an external service.
+#
+# the key insight: different alerts need different diagnostics. a latency alert
+# should check anthropic status first. a crash loop should look at pod describe
+# and previous logs. by letting Claude pick the tools, we avoid hardcoding
+# decision trees for every alert type.
 TOOLS = [
     {
         "name": "get_pod_status",
@@ -148,7 +155,11 @@ output format:
 
 
 def execute_tool(tool_name: str, tool_input: dict) -> str:
-    """execute a tool call and return the result as a string."""
+    """execute a tool call and return the result as a string.
+
+    maps Claude's tool_use requests to actual functions. returns strings
+    because thats what the Anthropic API expects in tool_result blocks.
+    """
     match tool_name:
         case "get_pod_status":
             return get_pod_status()
@@ -190,7 +201,17 @@ please diagnose this alert. use the available tools to gather information, then 
 
     messages = [{"role": "user", "content": user_message}]
 
-    # agentic loop — keep going until Claude gives a final text response
+    # -- agentic loop --
+    # this is the core pattern for Claude tool-use: we keep calling the API
+    # in a loop. each iteration, Claude either requests tools (stop_reason="tool_use")
+    # or produces a final text response (stop_reason="end_turn").
+    #
+    # typical flow for a latency alert:
+    #   iteration 1: Claude calls check_anthropic_status + get_pod_status
+    #   iteration 2: Claude calls get_pod_logs(grep="latency") based on what it saw
+    #   iteration 3: Claude produces final diagnosis text
+    #
+    # max_iterations is a safety valve — in practice it converges in 2-4 iterations.
     max_iterations = 10
     for i in range(max_iterations):
         log.info(f"triage iteration {i + 1}...")
@@ -203,12 +224,13 @@ please diagnose this alert. use the available tools to gather information, then 
             messages=messages,
         )
 
-        # check if claude wants to use tools
         if response.stop_reason == "tool_use":
-            # build the assistant message with all content blocks
+            # Claude wants to gather more info — append its response to the
+            # conversation and execute whatever tools it asked for.
             messages.append({"role": "assistant", "content": response.content})
 
-            # execute each tool call and collect results
+            # execute each tool call and send results back
+            # (Claude can request multiple tools in one turn)
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
@@ -222,10 +244,12 @@ please diagnose this alert. use the available tools to gather information, then 
                         }
                     )
 
+            # tool results go in a "user" message — this is how the Anthropic
+            # API expects tool results to be returned
             messages.append({"role": "user", "content": tool_results})
 
         else:
-            # claude is done — extract the final text
+            # Claude produced a final text response — we're done
             diagnosis = ""
             for block in response.content:
                 if hasattr(block, "text"):
@@ -236,7 +260,11 @@ please diagnose this alert. use the available tools to gather information, then 
 
 
 def handle_alertmanager_payload(payload: dict) -> str:
-    """parse alertmanager webhook payload and run triage for each alert."""
+    """parse alertmanager webhook payload and run triage for each alert.
+
+    alertmanager sends both "firing" and "resolved" alerts in the same webhook.
+    we only care about firing ones — resolved alerts dont need diagnosis.
+    """
     alerts = payload.get("alerts", [])
     results = []
 
@@ -301,11 +329,15 @@ def main():
     args = parser.parse_args()
 
     if args.serve:
+        # webhook mode — alertmanager posts here when alerts fire.
+        # in production this runs as a k8s deployment (or sidecar) with a
+        # ClusterIP service so alertmanager can reach it.
         server = HTTPServer(("0.0.0.0", args.port), WebhookHandler)
         log.info(f"incident triage webhook server listening on port {args.port}")
         server.serve_forever()
 
     elif args.alert:
+        # manual mode — useful for testing or re-triaging old alerts
         diagnosis = run_triage(args.alert, args.severity, args.description)
         print(diagnosis)
 
