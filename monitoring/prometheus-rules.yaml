@@ -1,0 +1,181 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: underwriting-agent-alerts
+  namespace: underwriting-agent
+  labels:
+    app.kubernetes.io/name: underwriting-agent
+    prometheus: kube-prometheus
+spec:
+  groups:
+    # ──────────────────────────────────────────
+    # SLO-based alerts
+    # ──────────────────────────────────────────
+    - name: underwriting-agent.slo
+      rules:
+        # p95 latency exceeding SLO (8s today, 5s target)
+        - alert: HighP95Latency
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_seconds_bucket{
+                namespace="underwriting-agent",
+                handler="/v1/items/process"
+              }[5m])) by (le)
+            ) > 8
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "p95 latency is above 8s SLO"
+            description: "p95 latency for item processing is {{ $value }}s (SLO: 8s)"
+
+        # p99 latency exceeding SLO
+        - alert: HighP99Latency
+          expr: |
+            histogram_quantile(0.99,
+              sum(rate(http_request_duration_seconds_bucket{
+                namespace="underwriting-agent",
+                handler="/v1/items/process"
+              }[5m])) by (le)
+            ) > 15
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "p99 latency is above 15s SLO"
+            description: "p99 latency for item processing is {{ $value }}s (SLO: 15s)"
+
+        # error rate SLO (99.5% success rate)
+        - alert: HighErrorRate
+          expr: |
+            (
+              sum(rate(http_requests_total{
+                namespace="underwriting-agent",
+                status=~"5.."
+              }[5m]))
+              /
+              sum(rate(http_requests_total{
+                namespace="underwriting-agent"
+              }[5m]))
+            ) > 0.005
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "error rate exceeds 0.5% SLO"
+            description: "{{ $value | humanizePercentage }} of requests are failing"
+
+    # ──────────────────────────────────────────
+    # infrastructure alerts
+    # ──────────────────────────────────────────
+    - name: underwriting-agent.infra
+      rules:
+        - alert: PodCrashLooping
+          expr: |
+            increase(kube_pod_container_status_restarts_total{
+              namespace="underwriting-agent"
+            }[1h]) > 3
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "pod {{ $labels.pod }} is crash-looping"
+
+        - alert: PodNotReady
+          expr: |
+            kube_pod_status_ready{
+              namespace="underwriting-agent",
+              condition="true"
+            } == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "pod {{ $labels.pod }} not ready for 5+ minutes"
+
+        - alert: HPAMaxedOut
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{
+              namespace="underwriting-agent"
+            }
+            ==
+            kube_horizontalpodautoscaler_spec_max_replicas{
+              namespace="underwriting-agent"
+            }
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "HPA at max replicas for 15+ minutes — may need to increase ceiling"
+
+        - alert: HighMemoryUsage
+          expr: |
+            container_memory_working_set_bytes{
+              namespace="underwriting-agent",
+              container="agent"
+            }
+            /
+            container_spec_memory_limit_bytes{
+              namespace="underwriting-agent",
+              container="agent"
+            } > 0.85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "pod {{ $labels.pod }} memory usage at {{ $value | humanizePercentage }}"
+
+    # ──────────────────────────────────────────
+    # LLM-specific alerts
+    # ──────────────────────────────────────────
+    - name: underwriting-agent.llm
+      rules:
+        - alert: LLMCallLatencyHigh
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(llm_call_duration_seconds_bucket{
+                namespace="underwriting-agent"
+              }[5m])) by (le)
+            ) > 6
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "LLM call p95 latency is {{ $value }}s — check anthropic API status"
+
+        - alert: LLMCallFailureRate
+          expr: |
+            (
+              sum(rate(llm_calls_total{
+                namespace="underwriting-agent",
+                status="error"
+              }[5m]))
+              /
+              sum(rate(llm_calls_total{
+                namespace="underwriting-agent"
+              }[5m]))
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "LLM failure rate above 5%"
+            description: "{{ $value | humanizePercentage }} of LLM calls are failing"
+
+    # ──────────────────────────────────────────
+    # data store alerts
+    # ──────────────────────────────────────────
+    - name: underwriting-agent.datastore
+      rules:
+        - alert: ReadinessProbeFailure
+          expr: |
+            sum(rate(http_requests_total{
+              namespace="underwriting-agent",
+              handler="/readyz",
+              status!="200"
+            }[5m])) > 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "readiness probe failing — postgres or S3 may be down"

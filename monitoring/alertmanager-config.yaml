@@ -1,0 +1,56 @@
+# alertmanager configuration for underwriting-agent alerts
+# this gets deployed alongside prometheus-operator / kube-prometheus-stack
+
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: underwriting-agent
+  namespace: underwriting-agent
+spec:
+  route:
+    receiver: default
+    groupBy: ["alertname", "severity"]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    routes:
+      # critical alerts go to pagerduty immediately
+      - matchers:
+          - name: severity
+            value: critical
+        receiver: pagerduty-critical
+        repeatInterval: 1h
+
+      # warnings go to slack
+      - matchers:
+          - name: severity
+            value: warning
+        receiver: slack-warnings
+        repeatInterval: 4h
+
+  receivers:
+    - name: default
+      slackConfigs:
+        - apiURL:
+            name: alertmanager-slack-webhook
+            key: url
+          channel: "#underwriting-agent-alerts"
+          title: '{{ .GroupLabels.alertname }}'
+          text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+
+    - name: pagerduty-critical
+      pagerdutyConfigs:
+        - routingKey:
+            name: alertmanager-pagerduty-key
+            key: routing-key
+          severity: critical
+          description: '{{ .GroupLabels.alertname }}: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+
+    - name: slack-warnings
+      slackConfigs:
+        - apiURL:
+            name: alertmanager-slack-webhook
+            key: url
+          channel: "#underwriting-agent-alerts"
+          title: ':warning: {{ .GroupLabels.alertname }}'
+          text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
